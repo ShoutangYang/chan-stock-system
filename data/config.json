@@ -1,0 +1,31 @@
+{
+  "chan": {
+    "min_stroke_bars": 5,
+    "power_ratio": 0.8,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9
+  },
+  "exit": {
+    "stop_pct": 0.1,
+    "take_pct": 0.08,
+    "max_hold": 25,
+    "use_chan_stop": false,
+    "exit_on_reverse": false
+  },
+  "exit_source": "optimized",
+  "strategies": {
+    "oversold": true,
+    "breakout": true,
+    "reversal": true
+  },
+  "auto_scan": {
+    "enabled": true,
+    "hour": 5,
+    "minute": 30,
+    "scan_type": "watchlist",
+    "market_limit": 120
+  },
+  "history_period": "2y",
+  "max_workers": 8
+}

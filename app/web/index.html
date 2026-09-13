@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美股缠论交易系统</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-title"><span class="brand-dot"></span>缠论交易系统</div>
+            <div class="brand-sub">US · HK EQUITY / CHAN THEORY</div>
+        </div>
+        <div class="mkt-switch" id="mktSwitch">
+            <div class="mkt-tab on" data-market="US">
+                <span class="mkt-flag">🇺🇸</span>美股
+                <span class="mkt-cur">USD</span>
+            </div>
+            <div class="mkt-tab" data-market="HK">
+                <span class="mkt-flag">🇭🇰</span>港股通
+                <span class="mkt-cur">HKD</span>
+            </div>
+        </div>
+        <nav class="nav">
+            <div class="nav-item active" data-page="dashboard">
+                <span class="ico">◈</span>总览看板<span class="nav-badge" id="badgeSignal">0</span>
+            </div>
+            <div class="nav-item" data-page="watchlist">
+                <span class="ico">☰</span>股票池<span class="nav-badge" id="badgePool">0</span>
+            </div>
+            <div class="nav-item" data-page="hot">
+                <span class="ico">✺</span>热点板块
+            </div>
+            <div class="nav-item" data-page="market">
+                <span class="ico">◎</span>市场扫描
+            </div>
+            <div class="nav-item" data-page="positions">
+                <span class="ico">▣</span>持仓盈亏
+            </div>
+            <div class="nav-item" data-page="review">
+                <span class="ico">◷</span>信号复盘
+            </div>
+            <div class="nav-item" data-page="volprice">
+                <span class="ico">◍</span>量价提醒<span class="nav-badge" id="badgeVP">0</span>
+            </div>
+            <div class="nav-item" data-page="backtest">
+                <span class="ico">⟲</span>策略回测
+            </div>
+            <div class="nav-item" data-page="optimize">
+                <span class="ico">✦</span>参数自迭代
+            </div>
+            <div class="nav-item" data-page="detail">
+                <span class="ico">▤</span>个股分析
+            </div>
+            <div class="nav-item" data-page="options">
+                <span class="ico">⬡</span>期权策略
+            </div>
+            <div class="nav-item" data-page="chan">
+                <span class="ico">☯</span>缠论图解
+            </div>
+            <div class="nav-item" data-page="settings">
+                <span class="ico">⚙</span>系统设置
+            </div>
+        </nav>
+        <div class="sidebar-foot">
+            数据源 Yahoo Finance<br>延迟 15 分钟 · 仅供研究
+        </div>
+    </aside>
+
+    <!-- 主区 -->
+    <div class="main">
+        <header class="topbar">
+            <h1 id="pageTitle">总览看板</h1>
+            <div class="spacer"></div>
+            <button class="btn primary" id="btnScan">⚡ 扫描股票池</button>
+        </header>
+
+        <div class="content">
+
+            <!-- ============ 总览 ============ -->
+            <section class="page on" id="page-dashboard">
+                <div class="grid grid-4" id="stats" style="margin-bottom:18px"></div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>策略命中分布</h2>
+                    </div>
+                    <div class="panel-body">
+                        <div class="grid grid-3" id="stratStats"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>今日信号</h2>
+                        <div class="spacer"></div>
+                        <div id="stratFilter" style="display:flex;gap:6px">
+                            <span class="chip on" data-v="all">全部</span>
+                            <span class="chip" data-v="oversold">超跌</span>
+                            <span class="chip" data-v="breakout">突破</span>
+                            <span class="chip" data-v="reversal">反转</span>
+                        </div>
+                    </div>
+                    <div class="panel-body flush" id="signalTable"></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>扫描状态</h2></div>
+                    <div class="panel-body">
+                        <div id="scanStatus" class="dim">尚未执行扫描</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 股票池 ============ -->
+            <section class="page" id="page-watchlist">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>添加标的</h2>
+                        <span class="tag accent" id="wlMarketTag">美股</span>
+                        <div class="spacer"></div>
+                        <span class="muted" style="font-size:12px">支持多个代码，用空格或逗号分隔</span>
+                    </div>
+                    <div class="panel-body">
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                            <input class="input" id="newSymbol" placeholder="例如 AAPL, NVDA, TSLA" style="width:260px">
+                            <input class="input" id="newTag" placeholder="标签（可选）" style="width:150px">
+                            <button class="btn primary" id="btnAdd">添加</button>
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+                            <span class="muted" style="font-size:12px">快速添加：</span>
+                            <span id="quickAdd" style="display:flex;gap:7px;flex-wrap:wrap"></span>
+                        </div>
+                        <div class="mkt-hint" id="wlMarketHint"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>我的股票池</h2>
+                        <span class="tag neutral" id="wlCount">0</span>
+                        <div class="spacer"></div>
+                        <div class="seg" id="wlFilter">
+                            <span class="chip on" data-mkt="">全部</span>
+                            <span class="chip" data-mkt="US">🇺🇸 美股</span>
+                            <span class="chip" data-mkt="HK">🇭🇰 港股</span>
+                        </div>
+                        <button class="btn sm" onclick="loadWatchlist()">刷新</button></div>
+                    <div class="panel-body flush" id="watchTable"></div>
+                </div>
+            </section>
+
+            <!-- ============ 热点板块 ============ -->
+            <section class="page" id="page-hot">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>市场热点板块 · 资金流向</h2>
+                        <span class="tag accent" id="hotMarketTag">美股</span>
+                        <div class="spacer"></div>
+                        <span class="muted" style="font-size:12px">统计窗口</span>
+                        <select class="select" id="hotWindow">
+                            <option value="1">当日</option>
+                            <option value="3">3 日</option>
+                            <option value="5" selected>5 日</option>
+                            <option value="10">10 日</option>
+                            <option value="20">20 日</option>
+                        </select>
+                        <select class="select" id="hotMode">
+                            <option value="full" selected>日线累计（准）</option>
+                            <option value="fast">仅当日实时（快）</option>
+                        </select>
+                        <button class="btn primary" id="btnHotRefresh">刷新</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:12.5px;line-height:1.7;margin-bottom:12px" id="hotDesc">
+                            追踪 <b>38 个板块 ETF</b>（11 大 GICS 行业 + 主题板块）与 <b>约 170 只主流美股</b>，
+                            用 <b>Chaikin A/D 累积派发线</b> 估算资金流向，找出资金最集中、流入最猛、撤离最快的地方。
+                        </p>
+                        <p class="dim" style="font-size:12.5px;line-height:1.7;margin-bottom:12px;color:var(--warn)">
+                            ⚠ 这是基于公开 OHLCV 的<b>估算值</b>，不是交易所真实资金流；
+                            A/D 看「收盘在当日区间的位置」而非涨跌——高开低走即使收涨也计为流出。
+                            请同时参考「强度」榜交叉验证。
+                        </p>
+                        <div class="grid grid-4" id="hotStats" style="margin-bottom:16px"></div>
+                        <div id="hotNote"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>① 资金最活跃的 TOP10 板块</h2>
+                        <div class="spacer"></div>
+                        <span class="muted" style="font-size:11.5px">活跃度 = 0.62×成交额分位 + 0.38×量比分位</span>
+                    </div>
+                    <div class="panel-body" id="hotActive"></div>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="panel">
+                        <div class="panel-head"><h2 style="color:var(--up)">② 资金流入 TOP5 板块</h2></div>
+                        <div class="panel-body" id="hotSecIn"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-head"><h2 style="color:var(--down)">③ 资金流出 TOP5 板块</h2></div>
+                        <div class="panel-body" id="hotSecOut"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="panel">
+                        <div class="panel-head"><h2 style="color:var(--up)">④ 资金流入 TOP10 个股</h2></div>
+                        <div class="panel-body" id="hotStkIn"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-head"><h2 style="color:var(--down)">⑤ 资金流出 TOP10 个股</h2></div>
+                        <div class="panel-body" id="hotStkOut"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>行业资金流聚合（按个股所属行业汇总）</h2>
+                        <div class="spacer"></div>
+                        <span class="muted" style="font-size:11.5px">与板块 ETF 榜互为交叉验证</span>
+                    </div>
+                    <div class="panel-body" id="hotIndustry"></div>
+                </div>
+            </section>
+
+            <!-- ============ 市场扫描 ============ -->
+            <section class="page" id="page-market">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>全市场选股</h2>
+                        <span class="tag accent" id="scanMarketTag">美股</span>
+                        <div class="spacer"></div>
+                        <span class="muted" style="font-size:12px">扫描数量</span>
+                        <select class="select" id="marketLimit">
+                            <option value="60">60 只</option>
+                            <option value="120" selected>120 只</option>
+                            <option value="200">200 只</option>
+                        </select>
+                        <button class="btn primary" id="btnMarketScan">开始扫描</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7" id="scanMarketDesc">
+                            按「超跌反弹 / 趋势突破 / 底部反转」三类策略扫描内置美股池（约 200 只主流标的与 ETF），
+                            并用缠论结构验证买卖点。扫描结果可直接加入股票池。
+                        </p>
+                        <div class="mkt-hint" id="scanMarketHint"></div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-head"><h2>扫描结果</h2></div>
+                    <div class="panel-body flush" id="marketResults">
+                        <div class="empty"><div class="big">◎</div><div class="msg">尚未扫描</div>
+                            <div class="hint">点击「开始扫描」发现机会（约需 1-3 分钟）</div></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 持仓盈亏 ============ -->
+            <section class="page" id="page-positions">
+                <div class="grid grid-4" id="posStats" style="margin-bottom:18px"></div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>持仓明细</h2>
+                        <div class="spacer"></div>
+                        <button class="btn sm" onclick="loadPositions()">刷新</button>
+                    </div>
+                    <div class="panel-body flush" id="posTable">
+                        <div class="empty"><div class="big">▣</div>
+                            <div class="msg">暂无持仓</div>
+                            <div class="hint">在「股票池」中点击「持仓」填写股数与成本价后，此处会显示实时盈亏</div></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 信号复盘 ============ -->
+            <section class="page" id="page-review">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>信号胜率统计</h2>
+                        <div class="spacer"></div>
+                        <button class="btn sm" onclick="loadReview(true)">重新计算</button>
+                        <button class="btn sm" onclick="loadReview()">刷新</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7;margin-bottom:16px">
+                            回溯每个缠论买卖点之后 5 / 10 / 20 个交易日的表现。
+                            买点成功 = 价格上涨；卖点成功 = 价格下跌。
+                            MFE 为区间内最大有利偏移（赚最多能赚多少），MAE 为最大不利偏移（最多要承受多少浮亏）。
+                        </p>
+                        <div id="reviewStats"></div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-head"><h2>信号明细</h2></div>
+                    <div class="panel-body flush" id="reviewTable"></div>
+                </div>
+            </section>
+
+            <!-- ============ 量价提醒 ============ -->
+            <section class="page" id="page-volprice">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>量价关系提醒</h2>
+                        <div class="spacer"></div>
+                        <button class="btn sm" id="btnVpRefresh">重新扫描</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7;margin-bottom:14px">
+                            价格是方向，成交量是动力。系统对股票池逐只识别
+                            <b>放量突破 / 缩量回踩 / 地量止跌 / 底部放量反转 / 量价底背离</b> 五类买入形态，
+                            与 <b>放量滞涨 / 量价顶背离 / 破位放量 / 天量见顶 / 高位放量长阴</b> 五类卖出形态。
+                            与缠论买卖点同向的信号会标注「共振」并提升置信度。
+                        </p>
+                        <div class="grid grid-4" id="vpStats" style="margin-bottom:16px"></div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label>置信度门槛（低于此值不提醒）</label>
+                                <input class="input" id="vpThreshold" type="number" step="1" min="40" max="95" value="55">
+                            </div>
+                            <div class="field">
+                                <label>数据周期</label>
+                                <select class="select" id="vpPeriod">
+                                    <option value="6mo">半年</option>
+                                    <option value="1y" selected>1 年</option>
+                                    <option value="2y">2 年</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label>自定义标的（留空用股票池）</label>
+                                <input class="input" id="vpSymbols" placeholder="例如 AAPL,NVDA">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h2 style="color:var(--up)">▲ 买入提醒</h2>
+                            <div class="spacer"></div>
+                            <span class="tag" id="vpBuyCount">0</span>
+                        </div>
+                        <div class="panel-body" id="vpBuys"></div>
+                    </div>
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h2 style="color:var(--down)">▼ 卖出提醒</h2>
+                            <div class="spacer"></div>
+                            <span class="tag" id="vpSellCount">0</span>
+                        </div>
+                        <div class="panel-body" id="vpSells"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>信号源有效性对比</h2>
+                        <div class="spacer"></div>
+                        <button class="btn sm" id="btnSrcCompare">运行对比回测</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7;margin-bottom:14px">
+                            同一套出场规则下，比较「缠论 / 量价 / 两者共振」的入场信号质量。
+                            <b>重点看样本外</b>——样本内好不算好，样本外好才算真的有效。
+                        </p>
+                        <div id="srcCompareResult"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>十类量价形态说明</h2></div>
+                    <div class="panel-body flush" id="vpMeta"></div>
+                </div>
+            </section>
+
+            <!-- ============ 策略回测 ============ -->
+            <section class="page" id="page-backtest">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>回测参数</h2>
+                        <div class="spacer"></div>
+                        <button class="btn primary" id="btnBacktest">运行回测</button>
+                    </div>
+                    <div class="panel-body">
+                        <div class="field-row">
+                            <div class="field">
+                                <label>标的（留空则用股票池，逗号分隔可自定义）</label>
+                                <input class="input" id="btSymbols" placeholder="例如 AAPL,NVDA,TSLA">
+                            </div>
+                            <div class="field">
+                                <label>数据周期</label>
+                                <select class="select" id="btPeriod">
+                                    <option value="2y">2 年</option>
+                                    <option value="3y" selected>3 年</option>
+                                    <option value="5y">5 年</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-4">
+                            <div class="field"><label>成笔K线数</label>
+                                <input class="input" id="btStroke" type="number" value="4" min="2" max="10"></div>
+                            <div class="field"><label>背驰阈值</label>
+                                <input class="input" id="btPower" type="number" step="0.05" value="1.0"></div>
+                            <div class="field"><label>止损 %</label>
+                                <input class="input" id="btStop" type="number" step="0.5" value="6"></div>
+                            <div class="field"><label>止盈 %</label>
+                                <input class="input" id="btTake" type="number" step="0.5" value="12"></div>
+                        </div>
+                        <div class="grid grid-3">
+                            <div class="field"><label>最大持有K线</label>
+                                <input class="input" id="btHold" type="number" value="20"></div>
+                            <div class="field"><label>交易模式</label>
+                                <select class="select" id="btMode">
+                                    <option value="long_only">只做多（卖点用于平仓）</option>
+                                    <option value="long_short">多空双向</option>
+                                </select></div>
+                            <div class="field"><label>样本外起点（0=全样本）</label>
+                                <input class="input" id="btOos" type="number" step="0.05" value="0" min="0" max="0.9"></div>
+                        </div>
+                        <div style="display:flex;gap:18px;flex-wrap:wrap">
+                            <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
+                                <input type="checkbox" id="btChanStop" checked> 使用缠论关键位止损
+                            </label>
+                            <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
+                                <input type="checkbox" id="btReverse" checked> 反向信号出场
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div id="btResult">
+                    <div class="empty"><div class="big">⟲</div>
+                        <div class="msg">运行回测以验证策略</div>
+                        <div class="hint">回测严格使用「当时已确认」的缠论结构，避免未来函数</div></div>
+                </div>
+            </section>
+
+            <!-- ============ 参数自迭代 ============ -->
+            <section class="page" id="page-optimize">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>参数自动搜索</h2>
+                        <div class="spacer"></div>
+                        <button class="btn primary" id="btnOptimize">开始迭代</button>
+                        <button class="btn" onclick="resetParams()">恢复默认参数</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7;margin-bottom:16px">
+                            随机采样参数组合 → 样本内（前 <b id="lblSplit">70</b>%）择优 →
+                            <b>样本外（后 30%）验证</b>。
+                            只有样本外超越默认参数才会被采纳，避免把噪声当成规律。
+                        </p>
+                        <div class="grid grid-4">
+                            <div class="field"><label>采样组数</label>
+                                <input class="input" id="opSamples" type="number" value="40" min="10" max="200"></div>
+                            <div class="field"><label>目标函数</label>
+                                <select class="select" id="opObjective">
+                                    <option value="risk_adjusted">收益/回撤比（推荐）</option>
+                                    <option value="expectancy">平均单笔收益</option>
+                                    <option value="sharpe">夏普比率</option>
+                                    <option value="profit_factor">盈亏比</option>
+                                    <option value="win_rate">胜率</option>
+                                </select></div>
+                            <div class="field"><label>样本内占比</label>
+                                <input class="input" id="opSplit" type="number" step="0.05" value="0.7" min="0.5" max="0.9"></div>
+                            <div class="field"><label>最少交易数</label>
+                                <input class="input" id="opMinTrades" type="number" value="25"></div>
+                        </div>
+                        <div id="opStatus" class="dim"></div>
+                    </div>
+                </div>
+                <div id="opResult"></div>
+            </section>
+
+            <!-- ============ 缠论图解 ============ -->
+            <section class="page" id="page-chan">
+                <div class="panel">
+                    <div class="panel-head"><h2>缠论的六个核心思想</h2></div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.75;margin-bottom:16px">
+                            缠论（缠中说禅《市场哲学的数学原理》）不是一套指标，而是一套
+                            <b>对走势进行完全分类的几何语言</b>。它先把无序的价格波动标准化为
+                            「分型—笔—线段—中枢」，再据此判断走势处在哪个阶段、何时可能转折。
+                        </p>
+                        <div class="grid grid-3" id="chanConcepts"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>从K线到买卖点：七步图解</h2></div>
+                    <div class="panel-body" id="chanDiagrams"></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>本系统应用了缠论的哪些内容</h2></div>
+                    <div class="panel-body flush" id="chanImpl"></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>在原版缠论基础上的七项升级</h2></div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.75;margin-bottom:16px">
+                            原版缠论是理论框架，落地时存在大量主观判断与歧义。本系统在保持其核心逻辑的前提下，
+                            做了一系列<b>可复现、可回测、可证伪</b>的工程化改造。
+                        </p>
+                        <div id="chanUpgrade"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>本系统未实现的部分</h2></div>
+                    <div class="panel-body">
+                        <div id="chanLimits"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 个股详情 ============ -->
+            <section class="page" id="page-detail">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2 id="detailTitle">个股分析</h2>
+                        <button class="btn sm" id="btnDetailBack" style="display:none">← 返回</button>
+                        <div class="spacer"></div>
+                        <input class="input" id="detailInput" placeholder="输入代码回车" style="width:180px">
+                    </div>
+                </div>
+                <div id="detailBody">
+                    <div class="empty"><div class="big">▤</div>
+                        <div class="msg">输入或点击一个股票代码开始分析</div>
+                        <div class="hint">系统会自动绘制缠论的笔、中枢与三类买卖点</div></div>
+                </div>
+            </section>
+
+            <!-- ============ 期权 ============ -->
+            <section class="page" id="page-options">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>期权策略分析</h2>
+                        <div class="spacer"></div>
+                        <input class="input" id="optSymbol" placeholder="例如 AAPL / NVDA / SPY" style="width:220px">
+                        <button class="btn primary" id="btnLoadOptions">分析</button>
+                    </div>
+                    <div class="panel-body">
+                        <p class="dim" style="font-size:13px;line-height:1.7">
+                            根据缠论买卖点自动匹配期权策略：一类/二类买点 → 现金担保卖出看跌（支撑位接货）或买入看涨；
+                            三类买点/突破 → 买入看涨或牛市价差；卖点 → 持股则备兑看涨，空仓则买入看跌。
+                            同时用 IV/HV 比值判断期权贵贱，决定买方或卖方倾向。
+                        </p>
+                    </div>
+                </div>
+                <div id="optBody">
+                    <div class="empty"><div class="big">⬡</div>
+                        <div class="msg">输入股票代码查看期权策略</div>
+                        <div class="hint">建议选择流动性好的标的（AAPL / NVDA / TSLA / SPY / QQQ）</div></div>
+                </div>
+            </section>
+
+            <!-- ============ 设置 ============ -->
+            <section class="page" id="page-settings">
+                <div class="panel">
+                    <div class="panel-head"><h2>缠论参数</h2></div>
+                    <div class="panel-body">
+                        <div class="field-row">
+                            <div class="field">
+                                <label>成笔最小K线数（min_stroke_bars）</label>
+                                <input class="input" id="setStrokeBars" type="number" min="2" max="10">
+                                <div class="muted" style="font-size:11.5px;margin-top:4px">
+                                    顶底分型之间至少间隔的合并K线数。默认 4（经典 5 根K线成笔）。调大 → 笔更少更稳定；调小 → 信号更灵敏。
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label>背驰力度比阈值（power_ratio）</label>
+                                <input class="input" id="setPowerRatio" type="number" step="0.05" min="0.5" max="1.5">
+                                <div class="muted" style="font-size:11.5px;margin-top:4px">
+                                    后段 MACD 柱面积 / 前段面积 小于该值即判定背驰。默认 1.0。调小 → 背驰判定更严格。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>策略开关</h2></div>
+                    <div class="panel-body">
+                        <label style="display:flex;align-items:center;gap:9px;margin-bottom:11px;cursor:pointer">
+                            <input type="checkbox" id="setOs"> 超跌反弹（深度回撤 + 超卖 + 底背驰）
+                        </label>
+                        <label style="display:flex;align-items:center;gap:9px;margin-bottom:11px;cursor:pointer">
+                            <input type="checkbox" id="setBo"> 趋势突破（放量突破通道 + 均线多头）
+                        </label>
+                        <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
+                            <input type="checkbox" id="setRv"> 底部反转（缠论一/二类买点 + K线形态 + MACD背离）
+                        </label>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head"><h2>每日自动扫描</h2></div>
+                    <div class="panel-body">
+                        <label style="display:flex;align-items:center;gap:9px;margin-bottom:13px;cursor:pointer">
+                            <input type="checkbox" id="setAutoScan"> 启用每日自动扫描
+                        </label>
+                        <div class="field-row">
+                            <div class="field">
+                                <label>执行时间（小时，服务器本地时间）</label>
+                                <input class="input" id="setHour" type="number" min="0" max="23">
+                            </div>
+                            <div class="field">
+                                <label>分钟</label>
+                                <input class="input" id="setMinute" type="number" min="0" max="59">
+                            </div>
+                        </div>
+                        <div class="muted" style="font-size:12px">
+                            美股收盘为北京时间凌晨 4:00（夏令时）/ 5:00（冬令时）。默认 05:30 扫描，
+                            确保拿到完整的当日日线数据。
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:10px">
+                    <button class="btn primary" id="btnSaveSettings">保存设置</button>
+                    <button class="btn" onclick="loadSettings()">重新载入</button>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</div>
+
+<!-- 持仓编辑模态 -->
+<div class="modal-mask" id="posModal">
+    <div class="modal">
+        <div class="modal-head">编辑持仓 · <span id="posSymbol"></span></div>
+        <div class="modal-body">
+            <div class="field-row">
+                <div class="field"><label>持仓股数</label><input class="input" id="posQty" type="number" placeholder="0"></div>
+                <div class="field"><label>成本价</label><input class="input" id="posCost" type="number" step="0.01" placeholder="0.00"></div>
+            </div>
+            <div class="field-row">
+                <div class="field"><label>目标价</label><input class="input" id="posTarget" type="number" step="0.01" placeholder="可选"></div>
+                <div class="field"><label>止损价</label><input class="input" id="posStop" type="number" step="0.01" placeholder="可选"></div>
+            </div>
+            <div class="muted" style="font-size:12px">填写持仓后，期权模块会优先推荐备兑看涨（Covered Call）等持股增强策略。</div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn" id="posCancel">取消</button>
+            <button class="btn primary" id="posSave">保存</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="/static/app.js"></script>
+<script>
+    document.getElementById('detailInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            const v = this.value.trim().toUpperCase();
+            if (v) openDetail(v);
+        }
+    });
+</script>
+</body>
+</html>
