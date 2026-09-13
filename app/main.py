@@ -937,11 +937,22 @@ def api_strategies():
     return {"ok": True, "items": strat.STRATEGY_META}
 
 
+def _app_version() -> str:
+    """读取仓库根目录 VERSION 文件（缺失时返回 dev，不阻塞启动）。"""
+    try:
+        with open(os.path.join(BASE_DIR, "VERSION"), "r", encoding="utf-8") as f:
+            v = f.read().strip()
+            return ("v" + v) if v else "dev"
+    except Exception:
+        return "dev"
+
+
 @app.get("/api/health")
 def api_health():
     return {
         "ok": True,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "version": _app_version(),
         "scan": scanner.get_scan_state(),
     }
 

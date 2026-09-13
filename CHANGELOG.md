@@ -1,5 +1,13 @@
 # 更新日志
 
+## v1.1.0 · 2026-09-14 06:54
+
+**feat: 侧边栏显示系统版本号 + start.py 支持 --reload 开发热重载**
+
+- **API 接口**：app/main.py
+- **前端页面**：app/web/app.js, app/web/index.html, app/web/style.css
+- **配置/脚本**：start.py
+
 ## v1.0.0 · 2026-09-13
 
 **初始版本入库：美股 + 港股通 缠论交易系统**

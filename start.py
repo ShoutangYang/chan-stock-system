@@ -114,6 +114,7 @@ def main() -> int:
     ap.add_argument("--host", type=str, default=DEFAULT_HOST, help="监听地址，默认 127.0.0.1")
     ap.add_argument("--restart", action="store_true", help="先结束占用端口的旧进程再启动")
     ap.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    ap.add_argument("--reload", action="store_true", help="开发模式：代码改动后自动重启")
     ap.add_argument("--log-level", default="info", help="uvicorn 日志级别")
     args = ap.parse_args()
 
@@ -135,10 +136,13 @@ def main() -> int:
         print(f"正在启动服务 http://{args.host}:{args.port} ...")
         log_path = os.path.join(BASE_DIR, "logs", "server.log")
         log = open(log_path, "a", encoding="utf-8")
+        cmd = [sys.executable, "-m", "uvicorn", "app.main:app",
+               "--host", args.host, "--port", str(args.port),
+               "--log-level", args.log_level]
+        if args.reload:
+            cmd.append("--reload")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "app.main:app",
-             "--host", args.host, "--port", str(args.port),
-             "--log-level", args.log_level],
+            cmd,
             stdout=log, stderr=subprocess.STDOUT, cwd=BASE_DIR,
         )
         if not wait_port(args.port, args.host):

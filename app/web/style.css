@@ -67,6 +67,12 @@ body {
     box-shadow: 0 0 10px var(--up);
 }
 .brand-sub { font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: .5px; }
+.brand-ver {
+    display: inline-block; margin-left: 4px; padding: 1px 6px;
+    border: 1px solid var(--border); border-radius: 999px;
+    font-size: 10px; color: var(--text-2); background: var(--bg-2, transparent);
+    letter-spacing: 0; vertical-align: 1px;
+}
 
 .nav { padding: 12px 10px; flex: 1; overflow-y: auto; }
 .nav-item {

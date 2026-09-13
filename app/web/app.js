@@ -2704,6 +2704,17 @@ function renderReview(res) {
         <tbody>${rows}</tbody></table></div>`;
 }
 
+// ---------------------------------------------------------------- 版本号
+/** 读取系统版本号显示在侧边栏（失败静默，不影响主流程） */
+async function loadVersion() {
+    const el = $('#appVersion');
+    if (!el) return;
+    try {
+        const r = await api('/api/health');
+        if (r && r.version) el.textContent = r.version;
+    } catch (_) { /* 版本号拿不到也不影响使用 */ }
+}
+
 // ---------------------------------------------------------------- 初始化
 document.addEventListener('DOMContentLoaded', () => {
     $$('.nav-item').forEach(n => n.addEventListener('click', () => go(n.dataset.page)));
@@ -2752,5 +2763,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (STATE.page === 'detail' && STATE.detail) drawChart();
     });
 
+    loadVersion();
     go('dashboard');
 });
