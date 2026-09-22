@@ -278,6 +278,25 @@ tbody tr:last-child td { border-bottom: none; }
     font-family: var(--mono);
     letter-spacing: .5px;
 }
+/* ---- 缠论精髓面板 ---- */
+.ess-verdict {
+    font-size: 13.5px; line-height: 1.7; color: var(--text-1);
+    background: var(--bg-2, rgba(127, 119, 221, .08));
+    border-left: 3px solid var(--accent, #7f77dd);
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 16px;
+}
+.ess-line { font-size: 12.5px; color: var(--text-2); line-height: 1.75; margin-bottom: 6px; }
+.ess-line b { color: var(--text-1); font-weight: 500; }
+.ess-note { font-size: 11.5px; color: var(--muted); line-height: 1.65; margin-top: 6px; }
+.ess-why {
+    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border-tertiary);
+}
+.ess-why-h, .ess-watch-h { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.ess-watch {
+    border: 1px solid var(--border-tertiary); border-radius: 8px;
+    padding: 11px 13px; margin-bottom: 10px;
+}
+
 .signal-reason { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
 .signal-meta { font-size: 11.5px; color: var(--muted); margin-top: 7px; display: flex; gap: 14px; flex-wrap: wrap; }
 

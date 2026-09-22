@@ -990,6 +990,14 @@ function renderDetail(d) {
         </div>
     </div>
 
+    <div class="panel">
+        <div class="panel-head">
+            <h2>缠论精髓</h2>
+            <span class="tag accent">走势必完美 · 中枢演化 · 区间套</span>
+        </div>
+        <div class="panel-body" id="essenceBody"></div>
+    </div>
+
     <div class="grid grid-2">
         <div class="panel">
             <div class="panel-head"><h2>缠论买卖点</h2></div>
@@ -1006,14 +1014,18 @@ function renderDetail(d) {
         <div class="panel-body" id="chanDetail"></div>
     </div>`;
 
-    // 买卖点
+    // 买卖点（用精髓层的依据做增强：同一 code 匹配）
     const sigs = chan.signals || [];
+    const advMap = {};
+    ((d.essence || {}).advices || []).forEach(a => { advMap[a.code] = a; });
+
     $('#chanSignals').innerHTML = sigs.length ? sigs.map(s => `
         <div class="signal-card ${s.side}">
             <div class="signal-head">
                 <span class="signal-code ${s.side === 'buy' ? 'up' : 'down'}">${s.code}</span>
                 <strong>${esc(s.name)}</strong>
                 <span class="tag ${s.side}">${s.side === 'buy' ? '买点' : '卖点'}</span>
+                ${advMap[s.code] ? `<span class="tag accent">确定性 ${advMap[s.code].certainty}</span>` : ''}
                 <div style="flex:1"></div>
                 <span class="muted" style="font-size:11.5px">${esc(s.date)}</span>
             </div>
@@ -1023,6 +1035,10 @@ function renderDetail(d) {
                 <span>止损参考 <strong class="num">${money(s.stop_loss)}</strong></span>
                 <span>置信度 <strong>${(s.confidence * 100).toFixed(0)}%</strong></span>
             </div>
+            ${advMap[s.code] ? `<div class="ess-why">
+                <div class="ess-why-h">缠论依据</div>
+                <ul class="reason-list">${advMap[s.code].reasons.map(r => `<li>${mdB(r)}</li>`).join('')}</ul>
+            </div>` : ''}
         </div>`).join('')
         : `<div class="empty" style="padding:30px"><div class="msg">当前无明确买卖点</div>
             <div class="hint">缠论讲究「不测而测」，无信号即观望</div></div>`;
@@ -1066,7 +1082,104 @@ function renderDetail(d) {
         ${divs.length ? `<div class="hr"></div><h4 style="font-size:13px;margin-bottom:9px" class="dim">背驰记录</h4>
         <ul class="reason-list">${divs.map(dv => `<li>${dv.kind === 'bull' ? '底背驰' : '顶背驰'}：前段力度 ${fmt(dv.prev_power, 3)} → 当前段 ${fmt(dv.curr_power, 3)}（比值 ${fmt(dv.ratio, 2)}）</li>`).join('')}</ul>` : ''}`;
 
+    renderEssence(d);
     drawChart();
+}
+
+/** 把 **粗体** 标记渲染成 <b>，其余先转义（后端理由文本用 ** 标记小标题） */
+function mdB(s) {
+    return esc(s == null ? '' : String(s)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+
+/** 缠论精髓面板：走势必完美 / 背驰性质 / 中枢演化 / 区间套 / 买卖点提示与理由 */
+function renderEssence(d) {
+    const box = $('#essenceBody');
+    if (!box) return;
+
+    const e = d.essence;
+    if (!e || !e.ok) {
+        box.innerHTML = `<div class="empty" style="padding:26px"><div class="msg">暂无精髓分析</div>
+            <div class="hint">需要足够长的K线才能形成中枢，也就无法做走势分类</div></div>`;
+        return;
+    }
+
+    const tt = e.trend_type || {}, pf = e.perfection || {}, dv = e.divergence || {},
+        ev = e.center_evolution || {}, ns = e.nested || {};
+
+    const card = (l, v, s) => `<div class="stat">
+        <div class="stat-label">${l}</div>
+        <div class="stat-value" style="font-size:18px">${esc(v || '—')}</div>
+        <div class="stat-sub">${esc(s || '')}</div></div>`;
+
+    let html = `
+        <div class="ess-verdict">${mdB(e.verdict || '')}</div>
+        <div class="grid grid-4" style="margin-bottom:16px">
+            ${card('走势类型', tt.type, `中枢 ${tt.center_count || 0} 个`)}
+            ${card('走势必完美', pf.completed ? '走势已完成' : '走势未完成', pf.certainty ? `确定性 ${pf.certainty}` : '')}
+            ${card('背驰性质', dv.kind, dv.guarantee)}
+            ${card('中枢演化', ev.current, ev.meaning)}
+        </div>
+        <div class="grid grid-2">
+            <div>
+                <h4 class="dim" style="font-size:13px;margin-bottom:8px">走势必完美（缠论第一原理）</h4>
+                <div class="ess-line"><b>依据</b>　${mdB(pf.evidence || '—')}</div>
+                <div class="ess-line"><b>必然发生</b>　${mdB(pf.expectation || '—')}</div>
+                <div class="ess-note">${esc(pf.note || '')}</div>
+            </div>
+            <div>
+                <h4 class="dim" style="font-size:13px;margin-bottom:8px">背驰与中枢演化</h4>
+                <div class="ess-line"><b>${esc(dv.kind || '—')}</b>　${mdB(dv.implication || '—')}</div>
+                <div class="ess-line"><b>中枢${esc(ev.current || '—')}</b>　${mdB(ev.desc || '—')}</div>
+            </div>
+        </div>
+        <div class="hr"></div>
+        <h4 class="dim" style="font-size:13px;margin-bottom:8px">区间套（周线 × 日线）</h4>
+        <div class="ess-line">${mdB(ns.desc || '—')}</div>
+        ${ns.note ? `<div class="ess-note">${esc(ns.note)}</div>` : ''}`;
+
+    const advs = e.advices || [];
+    if (advs.length) {
+        html += `<div class="hr"></div>
+            <h4 class="dim" style="font-size:13px;margin-bottom:9px">买卖点提示与理由</h4>` +
+            advs.map(a => `
+            <div class="signal-card ${a.side}">
+                <div class="signal-head">
+                    <span class="signal-code ${a.side === 'buy' ? 'up' : 'down'}">${a.code}</span>
+                    <strong>${esc(a.name)}</strong>
+                    <span class="tag ${a.side}">${a.side === 'buy' ? '买点' : '卖点'}</span>
+                    <span class="tag accent">确定性 ${a.certainty}</span>
+                    <div style="flex:1"></div>
+                    <span class="muted" style="font-size:11.5px">${esc(a.date || '')}</span>
+                </div>
+                <div class="signal-reason">${mdB(a.action || '')}</div>
+                <div class="signal-meta">
+                    <span>信号价 <strong class="num">${money(a.price)}</strong></span>
+                    <span>证伪止损 <strong class="num">${money(a.stop)}</strong></span>
+                    <span>证伪 <strong>${esc(a.invalidate || '')}</strong></span>
+                </div>
+                <div class="ess-why">
+                    <div class="ess-why-h">为什么是这个点</div>
+                    <ul class="reason-list">${a.reasons.map(r => `<li>${mdB(r)}</li>`).join('')}</ul>
+                </div>
+            </div>`).join('');
+    }
+
+    const wps = e.watchpoints || [];
+    if (wps.length) {
+        html += `<div class="hr"></div>
+            <h4 class="dim" style="font-size:13px;margin-bottom:9px">当前在等什么（观察提示）</h4>` +
+            wps.map(w => `
+            <div class="ess-watch">
+                <div class="ess-watch-h">
+                    <span class="tag ${w.tone === 'buy' ? 'buy' : (w.tone === 'sell' ? 'sell' : '')}">${esc(w.tag)}</span>
+                </div>
+                <div class="ess-line">${mdB(w.desc || '')}</div>
+                <ul class="reason-list">${(w.wait || []).map(t => `<li>${mdB(t)}</li>`).join('')}</ul>
+                <div class="ess-note">${esc(w.basis || '')}</div>
+            </div>`).join('');
+    }
+
+    box.innerHTML = html;
 }
 
 function drawChart() {

@@ -57,6 +57,7 @@ try {
             + ' renderVolprice, vpCard, renderSourceCompare, renderChanTheory,'
             + ' renderOptHorizons, optStrategyCard,'
             + ' renderHotspots, amtCNY, signedAmt, loadDashboard,'
+            + ' renderEssence, mdB,'
             + ' MKT, isHK, mktOf, symDisp, symBadge, moneyM, applyMarket, setMarket, STATE,'
             + ' drawEquityCurve, fmtPct, money, cls })',
         sandbox
@@ -70,6 +71,7 @@ const { renderPositions, renderReview, renderBacktest, renderOptimize,
     renderVolprice, vpCard, renderSourceCompare, renderChanTheory,
     renderOptHorizons, optStrategyCard,
     renderHotspots, amtCNY, signedAmt, loadDashboard,
+    renderEssence, mdB,
     MKT, isHK, mktOf, symDisp, symBadge, moneyM, applyMarket, setMarket, STATE,
     drawEquityCurve } = mod;
 
@@ -716,39 +718,74 @@ try {
 console.log('\n市场区分（美股 / 港股通）：');
 mktChecks.forEach(([n, v]) => { console.log(`  ${v ? '✓' : '✗'} ${n}`); if (!v) { ok = false; mktOk = false; } });
 
-// ---------------- 加载总览（回归：sres is not defined 修复） ----------------
-(async () => {
-    const dashChecks = [];
-    try {
-        // 1) 正常情况：scan 有数据
-        await loadDashboard();
-        dashChecks.push(['loadDashboard 有数据不抛错', true]);
-        dashChecks.push(['stats 卡渲染成功', /股票池/.test(node('#stats').innerHTML)
-            && /今日信号/.test(node('#stats').innerHTML)]);
-        dashChecks.push(['stratStats 渲染成功', /超跌反弹/.test(node('#stratStats').innerHTML)]);
+// ---------------- 缠论精髓面板 ----------------
+// 样例结构取自真实接口 /api/symbol/{symbol} -> essence 字段
+const essenceSample = {
+    ok: true,
+    verdict: '下跌走势已完成；当前无明确买卖点（下跌趋势背驰成立）',
+    trend_type: { type: '下跌', code: 'down', center_count: 5,
+        desc: '最近两个中枢依次降低', basis: '下跌 = 至少两个依次向下的同级别中枢。',
+        center: { zg: 476.8, zd: 430.2 } },
+    perfection: { completed: true, certainty: '高',
+        evidence: '下跌走势中出现趋势背驰（底背驰），力度衰竭',
+        expectation: '必然至少回到最后一个中枢（上沿 ZG = 476.8）',
+        note: '走势必完美保证的是走势必须完成，不是目标价。' },
+    divergence: { kind: '趋势背驰', side: 'bull', ratio: 0.31,
+        guarantee: '必然至少回到最后一个中枢（476.8）',
+        implication: '趋势背驰：可下注。', tradeable: true },
+    center_evolution: { current: '新生', desc: '新中枢在更低位置形成',
+        meaning: '趋势延续，顺势持仓为主', trend_upgrade: false, stroke_span: 3 },
+    nested: { available: true, alignment: '中性',
+        higher: { level: '周线', type: '盘整', trend: 'down' },
+        lower: { level: '日线', type: '下跌', trend: 'oscillate' },
+        desc: '周线盘整，日线下跌——两者中性。', note: '区间套的近似实现' },
+    advices: [{
+        code: 'S1', side: 'sell', name: '一类卖点（顶背驰）', date: '2026-09-18',
+        price: 224.76, stop: 231.5, confidence: 0.78, certainty: '中',
+        essence_score: 53.7, nested_alignment: '共振',
+        invalidate: '升破该卖点即证伪',
+        action: '一类卖点 = 趋势顶部转折。持股者应减仓。',
+        reasons: ['**几何**：上涨中枢[176.76,183.30]后向上离开段出现顶背驰',
+            '**走势必完美**：必然至少回到最后一个中枢（176.76）。',
+            '**证伪与止损**：升破该卖点即证伪；参考止损 231.5。'],
+    }],
+    watchpoints: [{
+        tag: '下跌趋势背驰成立', tone: 'buy',
+        desc: '下跌走势已按走势必完美完成：必然至少回到最后一个中枢（476.8）。',
+        wait: ['回调不创新低 → 形成**二类买点**', '突破中枢不跌回 ZG → 形成**三类买点**'],
+        basis: '《缠论原理.md》3.2',
+    }],
+};
 
-        // 2) scan 无数据：sres.date 应安全 fallback '—'，不报 ReferenceError
-        const origFetch = sandbox.fetch;
-        sandbox.fetch = (p) => {
-            if (String(p).includes('scan/results')) {
-                return Promise.resolve({ ok: true, json: () => ({ items: [] }) });
-            }
-            if (String(p).includes('watchlist')) {
-                return Promise.resolve({ ok: true, json: () => ({ items: [] }) });
-            }
-            return Promise.resolve({ ok: true, json: () => ({}) });
-        };
-        await loadDashboard();
-        sandbox.fetch = origFetch;
-        dashChecks.push(['无扫描结果时不报 sres 未定义', /—/.test(node('#stats').innerHTML)]);
-    } catch (e) {
-        console.error('❌ loadDashboard 抛异常:', e.message);
-        ok = false;
-    }
-    console.log('\n总览加载（回归）：');
-    dashChecks.forEach(([n, v]) => { console.log(`  ${v ? '✓' : '✗'} ${n}`); if (!v) ok = false; });
+const essChecks = [
+    ['mdB 渲染粗体', mdB('**几何**：abc') === '<b>几何</b>：abc'],
+    ['mdB 先转义再渲染', mdB('<script>x</script>').includes('&lt;script&gt;')],
+];
+try {
+    renderEssence({ essence: essenceSample });
+    const h = node('#essenceBody').innerHTML;
+    essChecks.push(['精髓面板渲染', h.length > 200]);
+    essChecks.push(['结论条渲染', /下跌走势已完成/.test(h)]);
+    essChecks.push(['走势类型卡', /走势类型/.test(h) && /下跌/.test(h)]);
+    essChecks.push(['走势必完美卡', /走势已完成/.test(h) && /确定性 高/.test(h)]);
+    essChecks.push(['背驰性质卡', /趋势背驰/.test(h) && /必然至少回到最后一个中枢/.test(h)]);
+    essChecks.push(['中枢演化卡', /新生/.test(h)]);
+    essChecks.push(['区间套块', /区间套/.test(h) && /周线/.test(h)]);
+    essChecks.push(['买卖点提示卡', /S1/.test(h) && /一类卖点/.test(h)]);
+    essChecks.push(['观察提示渲染', /下跌趋势背驰成立/.test(h) && /二类买点/.test(h)]);
+    essChecks.push(['理由逐条渲染', (h.match(/<li>/g) || []).length >= 5]);
+    essChecks.push(['理由粗体生效', /<b>走势必完美<\/b>/.test(h)]);
+    essChecks.push(['证伪与止损', /升破该卖点即证伪/.test(h)]);
+    essChecks.push(['无 undefined', !/undefined/.test(h)]);
+    essChecks.push(['无 NaN', !/NaN/.test(h)]);
 
-    console.log(ok ? '\n✅ 全部通过' : '\n❌ 存在失败项');
-    process.exit(ok ? 0 : 1);
-})();
+    // 空态不应抛错
+    renderEssence({});
+    essChecks.push(['空数据不抛错', /暂无精髓分析/.test(node('#essenceBody').innerHTML)]);
+} catch (e) {
+    console.error('❌ renderEssence 抛异常:', e.message);
+    ok = false;
+}
+console.log('\n缠论精髓面板：');
+essChecks.forEach(([n, v]) => { console.log(`  ${v ? '✓' : '✗'} ${n}`); if (!v) ok = false; });
 

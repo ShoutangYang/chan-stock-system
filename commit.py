@@ -56,7 +56,13 @@ GROUPS = [
 # ---------------------------------------------------------------- 基础工具
 
 def run(args, capture=True, check=False):
-    """执行 git 命令，统一使用 UTF-8，避免 Windows 控制台乱码。"""
+    """执行 git 命令，统一使用 UTF-8，避免 Windows 控制台乱码。
+
+    自动注入 -c core.quotepath=false：否则 git 会把中文路径输出成
+    "\\347\\274\\240..." 八进制转义，写进 CHANGELOG 就是一堆乱码。
+    """
+    if args and args[0] == "git":
+        args = ["git", "-c", "core.quotepath=false"] + list(args[1:])
     p = subprocess.run(
         args, cwd=ROOT, capture_output=capture, text=True,
         encoding="utf-8", errors="replace",
@@ -213,17 +219,21 @@ def main(argv):
     if part:
         new_version = bump(version, part)
         print(f"版本号: v{version}  ->  v{new_version}  ({part})")
-        write_version(new_version)
-        append_changelog(new_version, message, entries)
-        run(["git", "add", "-A"], check=True)   # 把 VERSION / CHANGELOG 一并纳入
 
     print("提交信息：")
     for line in message.splitlines():
         print("  " + line)
 
     if dry:
-        print("\n[dry-run] 未实际提交")
+        # 关键：dry-run 必须只读。早期版本在这里之前就写了 VERSION / CHANGELOG，
+        # 导致 --dry-run 后再正式执行会连跳两级版本号（1.1.3 → 1.2.0 → 1.3.0）。
+        print("\n[dry-run] 未实际提交；VERSION / CHANGELOG / 标签均未改动")
         return 0
+
+    if part:
+        write_version(new_version)
+        append_changelog(new_version, message, entries)
+        run(["git", "add", "-A"], check=True)   # 把 VERSION / CHANGELOG 一并纳入
 
     p = subprocess.run(["git", "commit", "-F", "-"], cwd=ROOT,
                        input=message, text=True, encoding="utf-8",

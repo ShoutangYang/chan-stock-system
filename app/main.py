@@ -34,6 +34,9 @@ from app.core.chanlun import ChanEngine
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "app", "web")
 
+# 缠论精髓层：高级别（周线）取样窗口。成笔参数按日线调校，周线需要更长历史才成得了笔。
+_ESSENCE_HIGH_PERIOD = "5y"
+
 app = FastAPI(title="美股缠论交易系统", version="1.0.0")
 
 db.init_db()
@@ -297,6 +300,36 @@ def api_symbol_detail(symbol: str, period: str = "2y", refresh: str = "0",
 
     # 缠论结构索引需要偏移到 tail 坐标系
     chan = res["chan"]
+
+    # ---- 缠论精髓层：走势必完美 / 中枢演化 / 背驰分类 / 区间套 ----
+    # 只读取 chan 的结果，不改动它，因此不影响既有信号与回测结果。
+    essence = None
+    try:
+        from app.core import chan_essence as ce
+
+        wchan = None
+        if level == "day":
+            # 日线为主级别时，用周线做大级别（区间套的近似实现）。
+            # 注意：成笔参数（min_stroke_bars）是按日线调的，直接套在 2 年的周线上
+            # 只会有 100 余根 K 线、几乎成不了笔（实测 NVDA 仅 1 笔 / 0 中枢）。
+            # 因此高级别必须取更长的历史，否则周线恒为「未定」，区间套失去意义。
+            wdf = None
+            try:
+                long_df = data_mod.get_history(symbol, period=_ESSENCE_HIGH_PERIOD,
+                                               interval="1d")
+                if long_df is not None and len(long_df) > len(df):
+                    wdf = to_weekly(long_df)
+            except Exception:
+                wdf = None
+            if wdf is None or len(wdf) < 60:
+                wdf = to_weekly(df)
+            if wdf is not None and len(wdf) >= 60:
+                wchan = ChanEngine(wdf, **(cfg.get("chan") or {})).analyze()
+        # level == "week" 时，其上是月线，当前不支持，故 wchan=None
+        essence = ce.analyze_essence(chan, wchan)
+    except Exception:
+        essence = None
+
     chan["offset"] = offset
     for key in ("fractals", "strokes", "centers"):
         for item in chan.get(key, []):
@@ -333,6 +366,7 @@ def api_symbol_detail(symbol: str, period: str = "2y", refresh: str = "0",
         "date": res["date"],
         "indicators": res["indicators"],
         "chan": chan,
+        "essence": essence,
         "hits": res["hits"],
         "klines": klines,
         "period": period,
