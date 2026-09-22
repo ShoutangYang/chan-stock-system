@@ -57,7 +57,7 @@ try {
             + ' renderVolprice, vpCard, renderSourceCompare, renderChanTheory,'
             + ' renderOptHorizons, optStrategyCard,'
             + ' renderHotspots, amtCNY, signedAmt, loadDashboard,'
-            + ' renderEssence, mdB,'
+            + ' renderEssence, mdB, lvLabel, LEVELS, LEVEL_LABEL, renderDetail,'
             + ' MKT, isHK, mktOf, symDisp, symBadge, moneyM, applyMarket, setMarket, STATE,'
             + ' drawEquityCurve, fmtPct, money, cls })',
         sandbox
@@ -71,7 +71,7 @@ const { renderPositions, renderReview, renderBacktest, renderOptimize,
     renderVolprice, vpCard, renderSourceCompare, renderChanTheory,
     renderOptHorizons, optStrategyCard,
     renderHotspots, amtCNY, signedAmt, loadDashboard,
-    renderEssence, mdB,
+    renderEssence, mdB, lvLabel, LEVELS, LEVEL_LABEL, renderDetail,
     MKT, isHK, mktOf, symDisp, symBadge, moneyM, applyMarket, setMarket, STATE,
     drawEquityCurve } = mod;
 
@@ -366,6 +366,7 @@ const cConcepts = node('#chanConcepts').innerHTML;
 const cDiag = node('#chanDiagrams').innerHTML;
 const cImpl = node('#chanImpl').innerHTML;
 const cUp = node('#chanUpgrade').innerHTML;
+const cLimit = node('#chanLimits').innerHTML;
 const cLim = node('#chanLimits').innerHTML;
 const cAll = cConcepts + cDiag + cImpl + cUp + cLim;
 
@@ -385,7 +386,11 @@ const chanChecks = [
     ['买卖点标注B1B2B3', /B1/.test(cDiag) && /B2/.test(cDiag) && /B3/.test(cDiag)],
     ['实现对照表', /merge_klines/.test(cImpl) && /find_fractals/.test(cImpl)
         && /build_strokes/.test(cImpl) && /detect_divergence/.test(cImpl)],
-    ['实现程度标记', /完整实现/.test(cImpl) && /实用简化/.test(cImpl) && /未实现/.test(cImpl)],
+    ['实现程度标记', /完整实现/.test(cImpl) && /实用简化/.test(cImpl) && /两级近似/.test(cImpl)
+        && /已实现/.test(cImpl)],
+    ['五档多周期对照', /get_intraday/.test(cImpl) && /30分钟 \/ 1小时 \/ 4小时 \/ 日线 \/ 周线/.test(cImpl)],
+    ['精髓层条目', /走势必完美/.test(cImpl) && /中枢演化/.test(cImpl) && /chan_essence/.test(cImpl)],
+    ['局限清单含数据限制', /分钟线历史长度/.test(cLimit) && /成笔阈值的级别差异/.test(cLimit)],
     ['七项升级', /线段构建去主观化/.test(cUp) && /无未来函数的回测/.test(cUp)
         && /次日开盘成交/.test(cUp) && /量价共振/.test(cUp) && /期权自动映射/.test(cUp)],
     ['升级含选择偏差说明', /选择偏差/.test(cUp)],
@@ -788,4 +793,80 @@ try {
 }
 console.log('\n缠论精髓面板：');
 essChecks.forEach(([n, v]) => { console.log(`  ${v ? '✓' : '✗'} ${n}`); if (!v) ok = false; });
+
+// ---------------- 多周期（30m / 1h / 4h / day / week） ----------------
+const lvChecks = [];
+function lvCheck(name, cond) { lvChecks.push([name, !!cond]); }
+
+lvCheck('级别清单五档', JSON.stringify(LEVELS) === JSON.stringify(['30m', '1h', '4h', 'day', 'week']));
+lvCheck('级别中文名 30分钟', lvLabel('30m') === '30分钟');
+lvCheck('级别中文名 1小时', lvLabel('1h') === '1小时');
+lvCheck('级别中文名 4小时', lvLabel('4h') === '4小时');
+lvCheck('级别中文名 日线', lvLabel('day') === '日线');
+lvCheck('级别中文名 周线', lvLabel('week') === '周线');
+lvCheck('未知级别回落日线', lvLabel('nope') === '日线');
+
+// 用带 warning 的样本验证数据提示条
+const lvSample = {
+    ok: true, symbol: 'AAPL', market: 'US', name: '苹果', date: '2026-09-22',
+    price: 339.01, change_pct: 0.42, level: '4h', level_label: '4小时',
+    warning: '4小时仅识别出 2 笔 / 0 中枢，结构不完整，走势类型与买卖点不可靠',
+    indicators: {}, chan: { trend: 'up' }, essence: null, hits: [],
+    klines: [{ i: 0, d: '2026-09-22 04:00', o: 1, h: 2, l: 0.5, c: 1.5, v: 10, ma20: null, ma60: null }],
+};
+let lvHtml = '';
+try {
+    renderDetail(lvSample);
+    lvHtml = node('#detailBody').innerHTML;
+    lvCheck('renderDetail 不抛错', lvHtml.length > 0);
+    lvCheck('数据提示条渲染', lvHtml.includes('数据提示'));
+    lvCheck('提示内容含结构不完整', lvHtml.includes('结构不完整'));
+    lvCheck('级别标签显示 4小时级别', node('#detailTitle').innerHTML.includes('4小时级别'));
+    lvCheck('五档切换 chip 齐全',
+        ['30分钟', '1小时', '4小时', '日线', '周线'].every(x => lvHtml.includes('>' + x + '</span>')));
+    lvCheck('无 undefined', !lvHtml.includes('undefined'));
+    lvCheck('无 NaN', !lvHtml.includes('NaN'));
+} catch (e) {
+    console.error('❌ renderDetail 抛异常:', e.message);
+    lvCheck('renderDetail 不抛错', false);
+}
+
+// 无 warning 时不该出现提示条
+const lvSample2 = Object.assign({}, lvSample, { warning: null, level: 'day' });
+try {
+    renderDetail(lvSample2);
+    const h2 = node('#detailBody').innerHTML;
+    lvCheck('无警告时不渲染提示条', !h2.includes('数据提示'));
+    lvCheck('日线级别标签', node('#detailTitle').innerHTML.includes('日线级别'));
+} catch (e) {
+    lvCheck('无警告时不渲染提示条', false);
+}
+
+// 区间套标题随级别动态显示
+const lvSample3 = Object.assign({}, lvSample, {
+    warning: null, level: '30m',
+    essence: {
+        ok: true, verdict: '测试', trend_type: { type: '上涨' },
+        perfection: { completed: true, certainty: '高', expectation: '必然回中枢', note: '' },
+        divergence: { kind: '趋势背驰', implication: '力度衰竭' },
+        center_evolution: { current: '新生', meaning: '趋势延续' },
+        nested: { available: true, higher: { level: '1小时', type: '上涨', trend: 'up' },
+                  lower: { level: '30分钟', type: '上涨', trend: 'up' },
+                  alignment: '共振', score_delta: 12, desc: '两者共振。', note: '近似' },
+        advices: [], watchpoints: [],
+    },
+});
+try {
+    renderDetail(lvSample3);
+    const h3 = node('#essenceBody').innerHTML;
+    lvCheck('区间套标题随级别动态', h3.includes('区间套（1小时 × 30分钟）'));
+    lvCheck('区间套不再写死周线日线', !h3.includes('区间套（周线 × 日线）'));
+    lvCheck('30分钟级别标签', node('#detailTitle').innerHTML.includes('30分钟级别'));
+} catch (e) {
+    console.error('❌ 区间套动态标题测试异常:', e.message);
+    lvCheck('区间套标题随级别动态', false);
+}
+
+console.log('\n多周期（30m/1h/4h/day/week）：');
+lvChecks.forEach(([n, v]) => { console.log(`  ${v ? '✓' : '✗'} ${n}`); if (!v) ok = false; });
 

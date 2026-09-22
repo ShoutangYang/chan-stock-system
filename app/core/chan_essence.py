@@ -296,20 +296,22 @@ def detect_center_evolution(chan: Dict[str, Any]) -> Dict[str, Any]:
 # 五、区间套（多级别联立）
 # ----------------------------------------------------------------------------
 def analyze_nested(day_chan: Dict[str, Any],
-                   week_chan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                   week_chan: Optional[Dict[str, Any]],
+                   lower_label: str = "日线",
+                   higher_label: str = "周线") -> Dict[str, Any]:
     """
     《缠论原理.md》第六章：大级别定方向，小级别找入场。
 
-    本系统没有完整的级别递归，但可以做**周线 × 日线**两级别联立——
+    本系统没有完整的级别递归，但可以做**相邻两个级别**（30分→1时→4时→日线→周线）的联立——
     这是区间套思想在当前数据条件下的可用近似。
 
-    共振判定：日线买卖点方向 与 周线走势方向 一致 → 共振（加分）
+    共振判定：本级别走势方向 与 大一级走势方向 一致 → 共振（加分）
               相反 → 矛盾（减分，提示降低仓位）
     """
     if not week_chan:
         return {
             "available": False,
-            "desc": "周线数据不足，无法做多级别联立。区间套需要至少两个级别的结构。",
+            "desc": f"{higher_label}数据不足，无法做多级别联立。区间套需要至少两个级别的结构。",
             "alignment": "中性", "score_delta": 0,
         }
 
@@ -329,22 +331,23 @@ def analyze_nested(day_chan: Dict[str, Any],
     else:
         alignment, delta = "中性", 0
 
-    desc = (f"周线走势类型：**{wtype.get('type')}**（趋势状态 {wtrend}），"
-            f"日线走势类型：**{dtype.get('type')}**（趋势状态 {dtrend}）——两者{alignment}。")
+    desc = (f"{higher_label}走势类型：**{wtype.get('type')}**（趋势状态 {wtrend}），"
+            f"{lower_label}走势类型：**{dtype.get('type')}**（趋势状态 {dtrend}）——两者{alignment}。")
     if alignment == "共振":
-        desc += "大级别与小级别方向一致，按区间套思想，日线信号可靠性提升。"
+        desc += f"大级别与小级别方向一致，按区间套思想，{lower_label}信号可靠性提升。"
     elif alignment == "矛盾":
-        desc += "大级别与小级别方向相反：日线的买点可能只是更大级别下跌中的一次反弹，建议降低仓位。"
+        desc += (f"大级别与小级别方向相反：{lower_label}的买点可能只是更大级别下跌中的"
+                 f"一次反弹，建议降低仓位。")
 
     return {
         "available": True,
-        "higher": {"level": "周线", "type": wtype.get("type"), "trend": wtrend},
-        "lower": {"level": "日线", "type": dtype.get("type"), "trend": dtrend},
+        "higher": {"level": higher_label, "type": wtype.get("type"), "trend": wtrend},
+        "lower": {"level": lower_label, "type": dtype.get("type"), "trend": dtrend},
         "alignment": alignment,
         "score_delta": delta,
         "desc": desc,
         "note": "完整的区间套要求'级别'作为可计算变量并逐级递归定位到单根K线；"
-                "本系统目前只有日线/周线两档，属区间套思想的近似实现。",
+                "本系统按固定档位（30分/1时/4时/日线/周线）两级联立，属区间套思想的近似实现。",
     }
 
 
@@ -574,12 +577,16 @@ def build_watchpoints(ttype: Dict[str, Any], dcls: Dict[str, Any],
 # 主入口
 # ----------------------------------------------------------------------------
 def analyze_essence(day_chan: Dict[str, Any],
-                    week_chan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    week_chan: Optional[Dict[str, Any]] = None,
+                    lower_label: str = "日线",
+                    higher_label: str = "周线") -> Dict[str, Any]:
     """
     缠论精髓分析主入口。
 
-    day_chan  : 当前级别（通常日线）的 ChanEngine.analyze() 结果
-    week_chan : 高一个级别（周线）的结果，用于区间套；可为空
+    day_chan     : 当前级别（日线 / 30分 / 1时 / 4时 …）的 ChanEngine.analyze() 结果
+    week_chan    : 高一个级别的结果，用于区间套；可为空
+    lower_label  : 当前级别中文名（用于区间套文案）
+    higher_label : 大一级中文名
     """
     if not day_chan:
         return {"ok": False, "error": "无缠论结构数据"}
@@ -588,7 +595,7 @@ def analyze_essence(day_chan: Dict[str, Any],
     dcls = classify_divergence(day_chan, ttype)
     perf = analyze_perfection(day_chan, ttype, dcls)
     evo = detect_center_evolution(day_chan)
-    nested = analyze_nested(day_chan, week_chan)
+    nested = analyze_nested(day_chan, week_chan, lower_label, higher_label)
     advices = build_advices(day_chan, ttype, dcls, perf, evo, nested)
     watchpoints = build_watchpoints(ttype, dcls, perf, evo) if not advices else []
 

@@ -29,13 +29,69 @@ from app.core import volprice as vp_mod
 from app.core import hotspot as hs_mod
 from app.core import fundamental as fund_mod
 from app.core.backtest import ExitRule, backtest_universe, result_to_dict
-from app.core.chanlun import ChanEngine
+from app.core.chanlun import (ChanEngine, DEFAULT_STROKE_BARS_BY_LEVEL,
+                              DEFAULT_STROKE_BARS_BY_MARKET)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "app", "web")
 
 # 缠论精髓层：高级别（周线）取样窗口。成笔参数按日线调校，周线需要更长历史才成得了笔。
 _ESSENCE_HIGH_PERIOD = "5y"
+
+# ----------------------------------------------------------------------------
+# 级别体系（区间套的档位）
+# ----------------------------------------------------------------------------
+LEVELS = ("30m", "1h", "4h", "day", "week")
+LEVEL_LABEL = {"30m": "30分钟", "1h": "1小时", "4h": "4小时",
+               "day": "日线", "week": "周线"}
+# 区间套：当前级别 -> 大一级
+HIGHER_LEVEL = {"30m": "1h", "1h": "4h", "4h": "day", "day": "week"}
+# 低于该根数，缠论结构基本不可用（成笔至少需 5 根合并K线，做中枢还要更多）
+MIN_BARS = {"30m": 120, "1h": 120, "4h": 60, "day": 120, "week": 60}
+
+
+def _chan_kwargs(cfg: Dict[str, Any], level: str,
+                 market: str = "") -> Dict[str, Any]:
+    """缠论引擎参数。成笔阈值按「市场×级别」取值（见 chanlun.DEFAULT_STROKE_BARS_BY_LEVEL）。
+
+    优先级：(市场, 级别) 覆盖 > 级别覆盖 > 用户配置的 min_stroke_bars。
+    """
+    kw = dict(cfg.get("chan") or {})
+    by_level = kw.get("stroke_bars_by_level") or DEFAULT_STROKE_BARS_BY_LEVEL
+    by_mkt = kw.get("stroke_bars_by_market") or DEFAULT_STROKE_BARS_BY_MARKET
+    v = (by_mkt.get(str(market).upper(), {}).get(level)
+         or by_level.get(level))
+    if v:
+        kw["min_stroke_bars"] = v
+    kw.pop("stroke_bars_by_level", None)     # 引擎不接受这两个键
+    kw.pop("stroke_bars_by_market", None)
+    return kw
+
+
+def _level_frame(symbol: str, level: str, period: str,
+                 refresh: bool = False) -> pd.DataFrame:
+    """按级别取 K 线：分钟级走 interval 通道，周线由日线合成。"""
+    intraday = getattr(data_mod, "INTRADAY_MINUTES", {}) or {}
+    if level == "week":
+        w = to_weekly(data_mod.get_history(symbol, period=period, interval="1d",
+                                           force_refresh=refresh))
+        # 周线根数天然稀少（2 年只有约 105 根），成笔参数按日线调校，
+        # 105 根几乎成不了笔（实测 AAPL 仅 2 笔 / 0 中枢，走势恒为「未定」），
+        # 因此默认拉 5 年再合成。
+        if len(w) < 160 and period != _ESSENCE_HIGH_PERIOD:
+            try:
+                w2 = to_weekly(data_mod.get_history(
+                    symbol, period=_ESSENCE_HIGH_PERIOD, interval="1d"))
+                if len(w2) > len(w):
+                    w = w2
+            except Exception:
+                pass
+        return w
+    if level in intraday:
+        return data_mod.get_history(symbol, period=period, interval=level,
+                                    force_refresh=refresh)
+    return data_mod.get_history(symbol, period=period, interval="1d",
+                                force_refresh=refresh)
 
 app = FastAPI(title="美股缠论交易系统", version="1.0.0")
 
@@ -254,21 +310,34 @@ def to_weekly(df: pd.DataFrame) -> pd.DataFrame:
 def api_symbol_detail(symbol: str, period: str = "2y", refresh: str = "0",
                       level: str = "day"):
     symbol = symbol.upper().strip()
-    try:
-        df = data_mod.get_history(symbol, period=period, interval="1d",
-                                  force_refresh=(refresh == "1"))
-    except Exception as e:
-        raise HTTPException(404, f"获取 {symbol} 数据失败: {e}")
+    from app.core.market import normalize as _norm
+    _mkt, _ = _norm(symbol)
+    # 级别归一化：兼容历史用法与常见写法
+    level = {"30min": "30m", "60min": "1h", "1H": "1h", "4H": "4h",
+             "m30": "30m", "h1": "1h", "h4": "4h",
+             "day": "day", "d": "day", "week": "week", "w": "week"}.get(level, level)
+    if level not in LEVELS:
+        raise HTTPException(400, f"不支持的级别 {level}，可选：{'/'.join(LEVELS)}")
 
-    # 周线级别：缠论强调多级别联立，周线用于确认日线信号的大级别位置
-    if level == "week":
-        df = to_weekly(df)
-        if len(df) < 60:
-            raise HTTPException(400, "周线数据不足，请改用更长的周期（如 5y/10y）")
+    try:
+        df = _level_frame(symbol, level, period, refresh=(refresh == "1"))
+    except Exception as e:
+        raise HTTPException(404, f"获取 {symbol} {LEVEL_LABEL.get(level, level)}数据失败: {e}")
+
+    # 数据充足度：低于 60 根连指标都算不出来（策略层硬门槛），直接报错；
+    # 介于 60 与 want 之间则出图但明确提示。
+    want = MIN_BARS.get(level, 60)
+    warn = None
+    if len(df) < 60:
+        raise HTTPException(
+            400, f"{LEVEL_LABEL.get(level, level)}数据不足（仅 {len(df)} 根，至少需要 60 根）"
+                 f"——分钟线受数据源历史长度限制：美股约 7 个月，港股仅约 1 个月")
+    if len(df) < want:
+        warn = (f"{LEVEL_LABEL.get(level, level)}仅 {len(df)} 根（建议 ≥{want} 根）")
 
     cfg = config.load()
     res = strat.analyze_symbol(df, symbol, strategies=_enabled_strategies(),
-                               chan_kwargs=cfg.get("chan", {}))
+                               chan_kwargs=_chan_kwargs(cfg, level, _mkt))
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "分析失败"))
 
@@ -307,28 +376,32 @@ def api_symbol_detail(symbol: str, period: str = "2y", refresh: str = "0",
     try:
         from app.core import chan_essence as ce
 
-        wchan = None
-        if level == "day":
-            # 日线为主级别时，用周线做大级别（区间套的近似实现）。
-            # 注意：成笔参数（min_stroke_bars）是按日线调的，直接套在 2 年的周线上
-            # 只会有 100 余根 K 线、几乎成不了笔（实测 NVDA 仅 1 笔 / 0 中枢）。
-            # 因此高级别必须取更长的历史，否则周线恒为「未定」，区间套失去意义。
-            wdf = None
+        # 区间套：取大一级的结构（30分→1时→4时→日线→周线）
+        hchan = None
+        higher = HIGHER_LEVEL.get(level)
+        hlabel = LEVEL_LABEL.get(higher or "", "")
+        if higher:
             try:
-                long_df = data_mod.get_history(symbol, period=_ESSENCE_HIGH_PERIOD,
-                                               interval="1d")
-                if long_df is not None and len(long_df) > len(df):
-                    wdf = to_weekly(long_df)
+                hdf = _level_frame(symbol, higher,
+                                   _ESSENCE_HIGH_PERIOD if higher == "week" else period)
             except Exception:
-                wdf = None
-            if wdf is None or len(wdf) < 60:
-                wdf = to_weekly(df)
-            if wdf is not None and len(wdf) >= 60:
-                wchan = ChanEngine(wdf, **(cfg.get("chan") or {})).analyze()
-        # level == "week" 时，其上是月线，当前不支持，故 wchan=None
-        essence = ce.analyze_essence(chan, wchan)
+                hdf = None
+            # 大一级只用于定方向，根数门槛可以比主级别低一些
+            if hdf is not None and len(hdf) >= max(40, MIN_BARS.get(higher, 60) // 2):
+                hchan = ChanEngine(hdf, **_chan_kwargs(cfg, higher, _mkt)).analyze()
+        # level == "week" 时其上是月线，当前不支持，故 hchan=None
+        essence = ce.analyze_essence(chan, hchan,
+                                     LEVEL_LABEL.get(level, level), hlabel)
     except Exception:
         essence = None
+
+    # 结构层面的充足度提示：根数够但成笔太少，说明该级别在这个标的上不可用
+    strokes = len((chan or {}).get("strokes") or [])
+    centers = len((chan or {}).get("centers") or [])
+    if centers == 0 or strokes < 6:
+        extra = (f"{LEVEL_LABEL.get(level, level)}仅识别出 {strokes} 笔 / {centers} 中枢，"
+                 f"结构不完整，走势类型与买卖点不可靠")
+        warn = f"{warn}；{extra}" if warn else extra
 
     chan["offset"] = offset
     for key in ("fractals", "strokes", "centers"):
@@ -371,6 +444,9 @@ def api_symbol_detail(symbol: str, period: str = "2y", refresh: str = "0",
         "klines": klines,
         "period": period,
         "level": level,
+        "level_label": LEVEL_LABEL.get(level, level),
+        "levels": [{"key": k, "label": LEVEL_LABEL[k]} for k in LEVELS],
+        "warning": warn,
     }
 
 

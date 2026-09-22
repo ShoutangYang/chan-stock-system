@@ -324,6 +324,218 @@ _PERIOD_BARS = {"1mo": 25, "3mo": 65, "6mo": 130, "1y": 250,
 
 
 # ----------------------------------------------------------------------------
+# 分钟级 K 线（30m / 1h / 4h）
+# ----------------------------------------------------------------------------
+# 数据源现状（实测 2026-09）：
+#   · 美股 —— 新浪 US_MinKService.getMinK，原生 5/15/30/60 分钟，固定返回约 1023 根
+#             （30m ≈ 4 个月、60m ≈ 7 个月）；时间戳是【美东时间】。
+#   · 港股 —— 新浪无港股分钟线；东方财富 klt=30/60 可用，但只给最近约 1 个月
+#             （30m 约 253 根）；时间戳是【北京时间】（港股与北京同为 UTC+8）。
+#   · 4 小时 —— 两家都没有原生 4h，必须由 60m 合成；美股 60m 有 1023 根故 4h 约 255 根，
+#             港股 60m 只有约 141 根，4h 仅约 35 根，结构分析基本不可用（界面会提示）。
+SINA_MIN_K = ("https://stock.finance.sina.com.cn/usstock/api/openapi.php"
+              "/US_MinKService.getMinK?symbol={sym}&type={t}")
+EM_KLINE_HOSTS = ("https://push2his.eastmoney.com",
+                  "https://63.push2his.eastmoney.com",
+                  "https://push2delay.eastmoney.com")
+EM_KLINE = ("/api/qt/stock/kline/get"
+            "?secid={sid}&klt={klt}&fqt=1&lmt={lmt}&end=20500101"
+            "&fields1=f1,f2,f3,f4,f5,f6"
+            "&fields2=f51,f52,f53,f54,f55,f56,f57"
+            "&ut=fa5fd1943c7b386f172d6893dbfba10b")
+
+# 目标周期 -> 分钟数
+INTRADAY_MINUTES = {"30m": 30, "1h": 60, "4h": 240}
+# 目标周期 -> 需要拉取的原生粒度（4h 无原生接口，用 60m 合成）
+INTRADAY_BASE = {30: 30, 60: 60, 240: 60}
+# 目标周期 -> 每 N 根原生 bar 合成 1 根
+INTRADAY_GROUP = {30: 1, 60: 1, 240: 4}
+
+SINA_MIN_TYPES = (5, 15, 30, 60)      # 新浪原生支持的分钟粒度
+EM_MIN_TYPES = (1, 5, 15, 30, 60)     # 东财原生支持的分钟粒度
+# 分钟线变化快，缓存时间要短于日线（4h）
+INTRADAY_TTL_SECONDS = 15 * 60
+# 分钟线统一取满（新浪固定 1023 根，东财受 1 个月窗口限制）
+INTRADAY_BARS = {"1mo": 320, "3mo": 500, "6mo": 800,
+                 "1y": 1024, "2y": 1024, "3y": 1024, "5y": 1024, "10y": 1024}
+
+
+def _to_beijing(dates, src_tz: str) -> pd.Series:
+    """把源时区的墙钟时间字符串转成北京时间字符串 "YYYY-MM-DD HH:MM"。
+
+    美股用 America/New_York（含夏令时），港股/东财用 Asia/Shanghai。
+    失败时退化为原样返回，保证不至于因为缺 tzdata 就整个功能不可用。
+    """
+    s = pd.to_datetime(pd.Series(list(dates)))
+    try:
+        from zoneinfo import ZoneInfo
+        localized = s.dt.tz_localize(ZoneInfo(src_tz), ambiguous=True,
+                                     nonexistent="shift_forward")
+        return localized.dt.tz_convert(ZoneInfo("Asia/Shanghai")).dt.strftime(
+            "%Y-%m-%d %H:%M")
+    except Exception:
+        return s.dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _group_bars(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    """每 n 根合成 1 根（60m -> 4h）。
+
+    关键：**绝不跨交易日**。按时间戳的日期部分分组后再切块，
+    否则会把昨夜收盘和今夜开盘拼成一根假 K 线。
+    美股一个交易日 6.5 小时，4h 合成后是「1 根满的 + 1 根 2.5 小时的尾巴」，
+    这是美股 4h 的固有形态，与 TradingView 等主流口径一致。
+    """
+    if n <= 1 or df.empty:
+        return df
+    d = df.copy()
+    d["_day"] = d["date"].astype(str).str.slice(0, 10)
+    out = []
+    for _, g in d.groupby("_day", sort=True):
+        g = g.reset_index(drop=True)
+        for i in range(0, len(g), n):
+            c = g.iloc[i:i + n]
+            out.append({
+                "date": str(c["date"].iloc[-1]),          # 用区间最后一根的时间戳
+                "open": float(c["open"].iloc[0]),
+                "high": float(c["high"].max()),
+                "low": float(c["low"].min()),
+                "close": float(c["close"].iloc[-1]),
+                "volume": float(c["volume"].sum()),
+            })
+    if not out:
+        return df
+    res = pd.DataFrame(out)
+    return res[["date", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+def sina_min_history(symbol: str, minutes: int = 30) -> pd.DataFrame:
+    """新浪美股分钟K。minutes ∈ {5,15,30,60}，约 1023 根。
+
+    返回的时间戳是【美东时间】原文，时区转换统一由 get_intraday 负责——
+    因为 4h 合成必须先按美东日期分组，提前转北京时间会把一个美股交易日劈成两天。
+    """
+    if minutes not in SINA_MIN_TYPES:
+        raise DataError(f"新浪不支持 {minutes} 分钟K")
+    sym = _safe_symbol(symbol)
+    text = _http_get(SINA_MIN_K.format(sym=sym, t=minutes),
+                     headers={"Referer": "https://finance.sina.com.cn/"},
+                     retries=3, timeout=25)
+    try:
+        data = ((json.loads(text).get("result") or {}).get("data")) or []
+    except Exception as e:
+        raise DataError(f"新浪分钟K解析失败: {e}")
+    if not data:
+        raise DataError("新浪分钟K为空")
+
+    rows = []
+    for x in data:
+        try:
+            rows.append({"date": str(x["d"]), "open": float(x["o"]),
+                         "high": float(x["h"]), "low": float(x["l"]),
+                         "close": float(x["c"]), "volume": float(x.get("v") or 0)})
+        except (KeyError, TypeError, ValueError):
+            continue
+    df = pd.DataFrame(rows)
+    df = df[df["close"] > 0]
+    if df.empty:
+        raise DataError("新浪分钟K无有效行")
+    df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    return df[["date", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+def em_secid(symbol: str) -> Optional[str]:
+    """美股/港股 -> 东财 secid。港股为 116.xxxxx，美股走 em_resolve 缓存。"""
+    mkt, code = _split(symbol)
+    if mkt == "HK":
+        return f"116.{code}" if code else None
+    r = em_resolve(symbol)
+    return r[0] if r else None
+
+
+def em_min_history(symbol: str, minutes: int = 30, bars: int = 1000) -> pd.DataFrame:
+    """东财分钟K（美股兜底 + 港股主力）。klt ∈ {1,5,15,30,60}，时间戳已是北京时间。"""
+    if minutes not in EM_MIN_TYPES:
+        raise DataError(f"东财不支持 {minutes} 分钟K")
+    sid = em_secid(symbol)
+    if not sid:
+        raise DataError(f"无法解析 {symbol} 的东财代码")
+    path = EM_KLINE.format(sid=sid, klt=minutes, lmt=max(100, min(int(bars), 5000)))
+    # 东财接口在国内网络下偶发被代理掐断，逐个主机试，必要时退避重试
+    text = None
+    last = None
+    for attempt in range(2):
+        for host in EM_KLINE_HOSTS:
+            try:
+                text = _http_get(host + path,
+                                 headers={"Referer": "https://quote.eastmoney.com/"},
+                                 retries=2, timeout=25)
+                if text:
+                    break
+            except Exception as e:
+                last = e
+        if text:
+            break
+        time.sleep(0.6 * (attempt + 1))
+    if not text:
+        raise DataError(f"东财分钟K请求失败: {last}")
+
+    try:
+        kl = ((json.loads(text).get("data") or {}).get("klines")) or []
+    except Exception as e:
+        raise DataError(f"东财分钟K解析失败: {e}")
+    if not kl:
+        raise DataError("东财分钟K为空")
+
+    rows = []
+    for line in kl:
+        p = str(line).split(",")
+        if len(p) < 6:
+            continue
+        try:
+            # f51时间 f52开 f53收 f54高 f55低 f56量
+            rows.append({"date": p[0].strip(), "open": float(p[1]),
+                         "close": float(p[2]), "high": float(p[3]),
+                         "low": float(p[4]), "volume": float(p[5])})
+        except (ValueError, IndexError):
+            continue
+    df = pd.DataFrame(rows)
+    df = df[df["close"] > 0]
+    if df.empty:
+        raise DataError("东财分钟K无有效行")
+    df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    return df[["date", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+def _fetch_minute_bars(symbol: str, minutes: int, bars: int) -> Tuple[pd.DataFrame, str]:
+    """返回 (原始分钟K, 源时区)。美股优先新浪，失败退东财；港股只走东财。"""
+    mkt, _ = _split(symbol)
+    errors: List[str] = []
+    if mkt == "US" and minutes in SINA_MIN_TYPES:
+        try:
+            return sina_min_history(symbol, minutes), "America/New_York"
+        except Exception as e:
+            errors.append(f"SINA: {e}")
+    try:
+        return em_min_history(symbol, minutes, bars), "Asia/Shanghai"
+    except Exception as e:
+        errors.append(f"EM: {e}")
+    raise DataError("分钟K获取失败：" + "；".join(errors))
+
+
+def get_intraday(symbol: str, interval: str = "30m", bars: int = 1024) -> pd.DataFrame:
+    """分钟级 K 线统一入口。interval ∈ {30m, 1h, 4h}；时间戳统一北京时间。"""
+    if interval not in INTRADAY_MINUTES:
+        raise DataError(f"不支持的分钟周期: {interval}")
+    mins = INTRADAY_MINUTES[interval]
+    df, src_tz = _fetch_minute_bars(symbol, INTRADAY_BASE[mins], max(200, int(bars)))
+    df = _group_bars(df, INTRADAY_GROUP[mins])       # 4h：先按源时区分组合成
+    df = df.copy()
+    df["date"] = _to_beijing(df["date"], src_tz)     # 再统一转北京时间
+    df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    return df.tail(max(20, int(bars))).reset_index(drop=True)
+
+
+# ----------------------------------------------------------------------------
 # 主入口
 # ----------------------------------------------------------------------------
 def get_history(
@@ -336,6 +548,30 @@ def get_history(
     """返回列：date, open, high, low, close, volume（升序）。"""
     mkt, symbol = _split(symbol)
     key = f"{mkt}_{symbol}_{interval}_{period}"
+
+    # 分钟级（30m / 1h / 4h）：走独立的分钟线通道
+    if interval in INTRADAY_MINUTES:
+        if not force_refresh and _cache_valid(key, ttl=INTRADAY_TTL_SECONDS):
+            try:
+                df = pd.read_csv(_cache_path(key))
+                if len(df) > 0:
+                    return df
+            except Exception:
+                pass
+        try:
+            df = get_intraday(symbol, interval, bars=INTRADAY_BARS.get(period, 1024))
+            _write_cache(key, df, f"{mkt}{symbol}")
+            return df
+        except Exception:
+            # 分钟线源在国内网络下会被代理间歇性掐断；此时宁可用过期缓存，
+            # 也不要让整个级别直接不可用。
+            try:
+                df = pd.read_csv(_cache_path(key))
+                if len(df) > 0:
+                    return df
+            except Exception:
+                pass
+            raise
 
     if mkt == "HK":
         if not force_refresh and _cache_valid(key):

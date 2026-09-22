@@ -686,16 +686,24 @@ async function addToPool(sym) {
 }
 
 // ---------------------------------------------------------------- 详情页
+// 级别：30分钟 / 1小时 / 4小时 / 日线 / 周线（区间套的档位，自小而大）
+const LEVELS = ['30m', '1h', '4h', 'day', 'week'];
+const LEVEL_LABEL = { '30m': '30分钟', '1h': '1小时', '4h': '4小时', day: '日线', week: '周线' };
+
+function lvLabel(lv) {
+    return LEVEL_LABEL[lv] || '日线';
+}
+
 async function openDetail(sym, level) {
     go('detail');
     const lv = level || STATE.detailLevel || 'day';
     const box = $('#detailBody');
-    box.innerHTML = `<div class="empty"><span class="spinner"></span><div class="msg" style="margin-top:12px">正在分析 ${sym}（${lv === 'week' ? '周线' : '日线'}）…</div></div>`;
+    box.innerHTML = `<div class="empty"><span class="spinner"></span><div class="msg" style="margin-top:12px">正在分析 ${sym}（${lvLabel(lv)}）…</div></div>`;
     STATE.detailSymbol = sym;
     STATE.detailLevel = lv;
 
     try {
-        const res = await api('/api/symbol/' + sym + (lv === 'week' ? '?level=week' : ''));
+        const res = await api('/api/symbol/' + sym + '?level=' + encodeURIComponent(lv));
         STATE.detail = res;
         renderDetail(res);
         loadFundamentals(sym);          // 不阻塞 K 线，基本面异步加载
@@ -894,7 +902,7 @@ function renderDetail(d) {
     const mkt = d.market || mktOf(d.symbol);
     $('#detailTitle').innerHTML = `${esc(symDisp(d.symbol))} <span class="muted" style="font-size:14px;font-weight:400">${esc(d.name)}</span>
         <span class="${isHK(d.symbol) ? 'sym-hk' : 'sym-us'}" style="font-size:11px">${MKT[mkt].flag} ${esc(MKT[mkt].name)}</span>
-        <span class="tag ${lv === 'week' ? 'accent' : 'neutral'}" style="margin-left:8px">${lv === 'week' ? '周线级别' : '日线级别'}</span>`;
+        <span class="tag ${lv === 'day' ? 'neutral' : 'accent'}" style="margin-left:8px">${lvLabel(lv)}级别</span>`;
     const ind = d.indicators || {};
     const chan = d.chan || {};
 
@@ -903,6 +911,12 @@ function renderDetail(d) {
 
     const box = $('#detailBody');
     box.innerHTML = `
+    ${d.warning ? `<div class="panel" style="border-left:3px solid #f5a623">
+        <div class="panel-body" style="padding:10px 14px">
+            <span style="color:#f5a623;font-weight:600">⚠ 数据提示</span>
+            <span class="muted" style="margin-left:8px">${esc(d.warning)}</span>
+        </div>
+    </div>` : ''}
     <div class="panel">
         <div class="panel-head">
             <h2>行情概览</h2>
@@ -961,8 +975,7 @@ function renderDetail(d) {
         <div class="chart-toolbar">
             <strong style="font-size:13px">K线与缠论结构</strong>
             <span style="width:12px"></span>
-            <span class="chip ${lv === 'day' ? 'on' : ''}" onclick="setLevel('day')">日线</span>
-            <span class="chip ${lv === 'week' ? 'on' : ''}" onclick="setLevel('week')">周线</span>
+            ${LEVELS.map(k => `<span class="chip ${lv === k ? 'on' : ''}" onclick="setLevel('${k}')">${lvLabel(k)}</span>`).join('')}
             <span style="width:12px"></span>
             <div class="spacer" style="flex:1"></div>
             <span class="chip ${STATE.chartBars === 60 ? 'on' : ''}" onclick="setBars(60)">60</span>
@@ -1133,7 +1146,7 @@ function renderEssence(d) {
             </div>
         </div>
         <div class="hr"></div>
-        <h4 class="dim" style="font-size:13px;margin-bottom:8px">区间套（周线 × 日线）</h4>
+        <h4 class="dim" style="font-size:13px;margin-bottom:8px">区间套（${esc((ns.higher || {}).level || '大级别')} × ${esc((ns.lower || {}).level || lvLabel(d.level))}）</h4>
         <div class="ess-line">${mdB(ns.desc || '—')}</div>
         ${ns.note ? `<div class="ess-note">${esc(ns.note)}</div>` : ''}`;
 
@@ -2544,8 +2557,10 @@ const CHAN_IMPL = [
     ['背驰', 'detect_divergence()', '完整实现 + 量化', 'MACD 柱面积比较 + 力度比阈值可调'],
     ['三类买点', 'find_signals()', '完整实现', 'B1/B2/B3，含止损位与置信度'],
     ['三类卖点', 'find_signals()', '完整实现', 'S1/S2/S3，与买点同一套逻辑'],
-    ['多级别联立', 'to_weekly()', '部分实现', '支持周线视图确认日线信号的大级别位置'],
-    ['区间套', '—', '未实现', '见下方说明'],
+    ['多级别联立', 'get_intraday() / to_weekly()', '已实现', '30分钟 / 1小时 / 4小时 / 日线 / 周线 五档可切换，相邻两档自动做区间套联立'],
+    ['走势必完美', 'chan_essence.analyze_perfection()', '已实现', '判定走势是否已完成、必然发生什么、确定性等级'],
+    ['中枢演化', 'chan_essence.detect_center_evolution()', '已实现', '延伸 / 扩展 / 扩张（级别升级）/ 新生'],
+    ['区间套', 'chan_essence.analyze_nested()', '两级近似', '见下方说明'],
 ];
 
 const CHAN_UPGRADE = [
@@ -2573,11 +2588,13 @@ const CHAN_UPGRADE = [
 ];
 
 const CHAN_LIMITS = [
-    ['区间套（多级别精确套嵌）', '仅提供日线/周线切换，未实现「用次级别背驰精确锁定本级别点位」的递归定位。周线目前只用于人工确认大级别位置。'],
+    ['区间套（多级别精确套嵌）', '已实现 30分钟/1小时/4小时/日线/周线 五档切换与相邻两档联立；但仍是「按固定档位两级联立」，'
+        + '未实现「以中枢级别为变量、逐级递归锁定到单根K线」的完整区间套。'],
     ['线段的特征序列划分', '已按升级第1条简化，与原版定义存在差异，极端行情下线段划分可能与人工判读不一致。'],
-    ['中枢的扩展与扩张', '实现了基础中枢识别，未区分中枢延伸、扩展、扩张等细分形态。'],
-    ['盘整背驰与趋势背驰的区分', '统一用力度比判断，未按原版严格区分两类背驰的不同处理方式。'],
-    ['小级别（分钟线）', '数据源为日线，不支持分钟级别的多级别联立分析。'],
+    ['分钟线历史长度', '受免费数据源限制：美股约 7 个月（新浪 1023 根），港股仅约 1 个月（东财）。'
+        + '港股 4 小时线因此常不足 60 根而无法分析。'],
+    ['成笔阈值的级别差异', '「≥5 根合并K线成笔」是按日线标定的经验值，直接用在大级别上会把结构饿死'
+        + '（实测日线口径下 4 小时线仅 2 笔 / 0 中枢），故 4 小时与周线降到 3，港股分钟线降到 3。'],
 ];
 
 function renderChanTheory() {
